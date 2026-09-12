@@ -1,0 +1,135 @@
+#!/bin/bash
+# Push-to-talk dictation via AirPods mic with deterministic Bluetooth setup.
+#
+# Classic BT cannot run A2DP + HFP mic simultaneously; the HFP (mSBC) SCO
+# link takes ~2.5 s after a profile switch before it carries real audio, and
+# WirePlumber's autoswitch restores A2DP within ~1 s unless a capture stream
+# is linked. This wrapper therefore, on key-down:
+#
+#   1. switches the card to headset-head-unit (mSBC)
+#   2. immediately links a sustained "primer" capture to the AirPods
+#      capture filter (keeps autoswitch from restoring A2DP and starts SCO
+#      establishment right away)
+#   3. waits out the SCO setup, plays a short ready-beep
+#   4. starts voxtype recording
+#
+# On key-up: stops recording, drops the primer, and restores A2DP (AAC)
+# after a short delay. While the mic is live, playback continues through
+# the headset profile (mono, lower quality) - iPhone behavior.
+#
+# Install: symlink onto PATH and bind in hypr bindings.lua:
+#   o.bind("F9", "Start dictation (push-to-talk)", "airpods-dictate start")
+#   o.bind("F9", "Stop dictation (push-to-talk)", "airpods-dictate stop", { release = true })
+
+set -u
+
+MAC=AA:68:25:03:19:D8
+CARD=bluez_card.AA_68_25_03_19_D8
+HFP_PROFILE=headset-head-unit
+A2DP_PROFILE=a2dp-sink
+SCO_SETTLE=2.8     # measured: ~2.5 s from capture-start to real audio
+RESTORE_DELAY=1.2  # seconds after stop before restoring A2DP
+PRIMER_PIDFILE=/tmp/airpods-dictate.primer
+READY_BEEP=/usr/share/sounds/freedesktop/stereo/bell.oga
+
+log() { echo "[airpods-dictate] $*" >&2; }
+notify() {
+	omarchy-notification-send "$1" 2>/dev/null || notify-send "AirPods dictation" "$1" 2>/dev/null || true
+}
+
+active_profile() {
+	pactl list cards 2>/dev/null | awk '/bluez_card/{f=1} f&&/Active Profile/{print $3; f=0}'
+}
+
+connected() {
+	bluetoothctl info "$MAC" 2>/dev/null | grep -q 'Connected: yes'
+}
+
+capture_filter_id() {
+	wpctl status 2>/dev/null | awk '/bluez_capture_internal/ {gsub(/\./,"",$2); print $2; exit}'
+}
+
+kill_primer() {
+	if [[ -f $PRIMER_PIDFILE ]]; then
+		kill "$(cat "$PRIMER_PIDFILE" 2>/dev/null)" 2>/dev/null || true
+		rm -f "$PRIMER_PIDFILE"
+	fi
+}
+
+start_primer() {
+	local fid
+	fid=$(capture_filter_id)
+	[[ -z $fid ]] && return 1
+	nohup pw-record --target "$fid" /dev/null >/dev/null 2>&1 &
+	echo $! > "$PRIMER_PIDFILE"
+}
+
+cmd=${1:-}
+
+case $cmd in
+start)
+	if ! connected; then
+		notify "AirPods not connected - dictation unavailable"
+		exit 1
+	fi
+
+	# Cancel a pending A2DP restore from a previous stop, and reuse the
+	# still-warm primer if the profile is already HFP.
+	if [[ -f /tmp/airpods-dictate.restore ]]; then
+		kill "$(cat /tmp/airpods-dictate.restore 2>/dev/null)" 2>/dev/null || true
+		rm -f /tmp/airpods-dictate.restore
+	fi
+
+	if [[ $(active_profile) == "$HFP_PROFILE" ]]; then
+		log "already in HFP; starting capture"
+	else
+		kill_primer
+		pactl set-card-profile "$CARD" "$HFP_PROFILE" 2>/dev/null || true
+		# Link the primer immediately so autoswitch sees a capture stream
+		# and does not restore A2DP under us.
+		start_primer || { notify "AirPods mic node not ready - tap F9 again"; exit 1; }
+		# Wait for the profile to apply, then for SCO to carry audio.
+		t0=$SECONDS
+		while :; do
+			[[ $(active_profile) == "$HFP_PROFILE" ]] && break
+			if (( SECONDS - t0 >= 4 )); then
+				notify "Mic not ready (switch timed out) - tap F9 again"
+				kill_primer
+				pactl set-card-profile "$CARD" "$A2DP_PROFILE" 2>/dev/null || true
+				exit 1
+			fi
+			sleep 0.1
+		done
+		sleep "$SCO_SETTLE"
+	fi
+
+	# Make sure the default source is the AirPods (voxtype records "default").
+	defsrc=$(pactl get-default-source 2>/dev/null)
+	if [[ $defsrc != "bluez_input.$MAC" ]]; then
+		pactl set-default-source "bluez_input.$MAC" 2>/dev/null || true
+	fi
+
+	# Ready-beep so the user knows when speech will be captured from.
+	[[ -f $READY_BEEP ]] && paplay "$READY_BEEP" 2>/dev/null &
+
+	log "recording starts"
+	exec voxtype record start
+	;;
+stop)
+	voxtype record stop 2>/dev/null || true
+	log "recording stopped"
+
+	# Drop the primer and restore high-quality playback shortly after, so
+	# the mic stream is really gone before the transport switches back.
+	(
+		sleep "$RESTORE_DELAY"
+		kill_primer
+		pactl set-card-profile "$CARD" "$A2DP_PROFILE" 2>/dev/null || true
+	) &
+	echo $! > /tmp/airpods-dictate.restore
+	;;
+*)
+	echo "usage: $0 start|stop" >&2
+	exit 2
+	;;
+esac
