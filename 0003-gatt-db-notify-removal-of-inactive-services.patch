@@ -1,0 +1,23 @@
+diff --git i/src/shared/gatt-db.c w/src/shared/gatt-db.c
+index 751d4c3da..2fa2bc6e7 100644
+--- i/src/shared/gatt-db.c
++++ w/src/shared/gatt-db.c
+@@ -507,8 +507,16 @@ static void gatt_db_service_destroy(void *data)
+ 	struct gatt_db_service *service = data;
+ 	int i;
+ 
+-	if (service->active)
+-		notify_service_changed(service->db, service, false);
++	/*
++	 * Always notify listeners about the removal, even for services that
++	 * were never set active. Observers such as gatt-client discovery ops
++	 * keep references to services in their pending lists; without this
++	 * notification the pending entries are left dangling whenever inactive
++	 * services are cleared from the database (e.g. gatt_db_clear_range()
++	 * while a discovery is in flight), resulting in a use-after-free in
++	 * discovery_op_complete().
++	 */
++	notify_service_changed(service->db, service, false);
+ 
+ 	for (i = 0; i < service->num_handles; i++)
+ 		attribute_destroy(service->attributes[i]);

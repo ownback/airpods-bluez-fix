@@ -5,19 +5,21 @@
 # Contributor: Geoffroy Carrier <geoffroy@archlinux.org>
 # Local fork: AirPods Pro 3 crash fixes — see README.md
 #
-# Based on the official Arch bluez PKGBUILD with two local patches:
+# Based on the official Arch bluez PKGBUILD with three local patches:
 #  - 0001: upstream fix 3f0cffa8df578a9ec2a133f896113c8a02eef250
 #    ("a2dp: Fix loading of remote SEP from cache") cherry-picked on top of
 #    the 5.87 tag. Without it bluetoothd segfaults in load_remote_sep()
 #    right after "Unable to load LastUsed: rseid N not found".
 #  - 0002: defensive NULL-guard in gatt-client discovery_op_complete() to
-#    stop a segfault/use-after-free when a GATT service discovery is
-#    aborted mid-flight (see README.md for details).
+#    stop a segfault when a GATT service discovery is aborted mid-flight.
+#  - 0003: gatt-db notifies observers about removal of inactive services
+#    too, so discovery ops' pending service lists can never hold dangling
+#    attribute pointers (the real use-after-free behind the crash above).
 
 pkgbase=bluez
 pkgname=('bluez' 'bluez-utils' 'bluez-libs' 'bluez-cups' 'bluez-deprecated-tools' 'bluez-hid2hci' 'bluez-mesh' 'bluez-obex')
 pkgver=5.87
-pkgrel=5
+pkgrel=6
 url="http://www.bluez.org/"
 arch=('x86_64')
 license=('GPL-2.0-only')
@@ -25,10 +27,12 @@ makedepends=('dbus' 'libical' 'systemd' 'alsa-lib' 'json-c' 'ell' 'python-docuti
 source=("git+https://github.com/bluez/bluez.git#tag=$pkgver"
         "0001-a2dp-Fix-loading-of-remote-SEP-from-cache.patch"
         "0002-gatt-client-null-guard-discovery-op.patch"
+        "0003-gatt-db-notify-removal-of-inactive-services.patch"
 	bluetooth.modprobe)
 b2sums=('SKIP'
         '8e19f1f59fa0e49df83ade6b394bc4bd71ba3efb2f102076e8dd672a18617bcc7f10790285f8ca579b05783b6cc8a70d2ea5f92500c4346e330a4082f38093e4'
         '8733a158256770236c1e16f9b9fff97b722d985004a36f6ed1dec9e9fa000782fb8294f7fdcc0291e9a39fe4560b4a916fc46543d5c155d1ce597566e52901da'
+        '4aecd0dcbd3b2419f4865670cbf4332123e9d655a9ce98023ad266c5a439fbdddbd57f94c4043e60e3b51a05c24384e5eed60ecde7350032fc4310c4f5661d12'
         '0ce33d13b796d4ae2fd688b17742b3a3055663b68a352b02720dac82bcfdaa47bf2ee2a034dfb8ef4ddf3f827bc58fe80548730939c2915f64864cea39c10170')
 # validpgpkeys=('E932D120BC2AEC444E558F0106CA9F5D1DCF2659') # Marcel Holtmann <marcel@holtmann.org>
 
@@ -36,6 +40,7 @@ prepare() {
   cd "${pkgname}"
   patch -Np1 -i ../0001-a2dp-Fix-loading-of-remote-SEP-from-cache.patch
   patch -Np1 -i ../0002-gatt-client-null-guard-discovery-op.patch
+  patch -Np1 -i ../0003-gatt-db-notify-removal-of-inactive-services.patch
   autoreconf -vfi
 }
 

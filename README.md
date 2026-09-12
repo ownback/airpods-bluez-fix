@@ -43,21 +43,32 @@ the AirPods' LE connection is opened/closed repeatedly — exactly what the
 Omarchy `soup.airpods` bar widget does when it opens its Apple AAP (L2CAP
 PSM 0x1001) channel.
 
-`0002-gatt-client-null-guard-discovery-op.patch` adds the NULL-guard that
-fixes the NULL case. The use-after-free case is believed to still exist
-upstream; if `bluetoothd` ever crashes again at that call site, capture
-`coredumpctl info` and see the TODO in "Status" below.
+Two patches fix this:
+
+- `0002-gatt-client-null-guard-discovery-op.patch` — defensive NULL-guard
+  in `discovery_op_complete()` for the NULL-`attr` case.
+- `0003-gatt-db-notify-removal-of-inactive-services.patch` — the real fix
+  for the use-after-free. `gatt_db_service_destroy()` only fired the
+  service-removed notification for services that had been set active, so
+  any discovery op holding a *non-active* service in its `pending_svcs`
+  list was left with a dangling pointer whenever the database was cleared
+  under it (`gatt_db_clear_range()` from `service_changed_failure()`,
+  disconnect cleanup, etc.). The next `discovery_op_complete()` then called
+  `gatt_db_service_get_active()` on freed memory. The patch makes the
+  destroy path always notify, keeping every observer's pending list in
+  sync. This should be submitted upstream to bluez.
 
 Reference for the same bug class fixed before:
 https://patchwork.kernel.org/project/bluetooth/patch/20201105224923.377-1-sonnysasaka@chromium.org/
 
 ## Status (2026-09-12)
 
-- Works with bluez 5.87 + both patches: AirPods Pro 3 connect, A2DP
+- Works with bluez 5.87 + all three patches: AirPods Pro 3 connect, A2DP
   sink/source appear, audio plays, mic works via HFP profile switching.
-- `soup.airpods` plugin currently DISABLED because the deeper GATT
-  use-after-free was still reachable with it enabled (crash with non-NULL
-  dangling `attr`). Re-enable after the UAF fix lands.
+- `soup.airpods` plugin currently DISABLED; the GATT UAF fix (0003) needs
+  live validation with the plugin re-enabled before it can be trusted.
+  Soak-test plan: enable plugin, connect/disconnect repeatedly with music
+  playing, watch `journalctl -u bluetooth` for segfaults.
 
 ## Build and install
 
