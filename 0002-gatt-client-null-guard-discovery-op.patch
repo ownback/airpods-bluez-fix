@@ -1,0 +1,14 @@
+diff --git i/src/shared/gatt-client.c w/src/shared/gatt-client.c
+index a6abe8ac2..a365d0aa5 100644
+--- i/src/shared/gatt-client.c
++++ w/src/shared/gatt-client.c
+@@ -453,6 +453,9 @@ static void discovery_op_complete(struct discovery_op *op, bool success,
+ 		uint16_t start, end;
+ 
+ 		/* Leave active services if operation was aborted */
++		if (!attr)
++			continue;
++
+ 		if ((!success && err == 0) && gatt_db_service_get_active(attr))
+ 			continue;
+ 

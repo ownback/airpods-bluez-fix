@@ -1,0 +1,11 @@
+src/
+pkg/
+fakeinstall/
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+*.log
+*.tar.gz
+config.guess~
+config.sub~
+configure~
+.SRCINFO.bak

@@ -1,0 +1,18 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = bluez
+Target = bluez-libs
+Target = bluez-utils
+Target = bluez-cups
+Target = bluez-deprecated-tools
+Target = bluez-hid2hci
+Target = bluez-mesh
+Target = bluez-obex
+
+[Action]
+Description = Blocking bluez replacement (locally patched for AirPods Pro 3)
+When = PreTransaction
+Exec = /usr/local/bin/bluez-guard
+AbortOnFail
