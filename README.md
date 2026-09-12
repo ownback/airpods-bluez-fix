@@ -73,7 +73,7 @@ https://patchwork.kernel.org/project/bluetooth/patch/20201105224923.377-1-sonnys
 ## Build and install
 
 ```bash
-git clone https://github.com/<USER>/airpods-bluez-fix.git
+git clone https://github.com/ownback/airpods-bluez-fix.git
 cd airpods-bluez-fix
 makepkg -si
 sudo systemctl restart bluetooth
